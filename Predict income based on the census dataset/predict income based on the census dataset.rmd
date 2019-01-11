@@ -1,0 +1,271 @@
+---
+title: "Predict whether income exceeds $50K/yr based on the census dataset"
+output: html_document
+---
+This project is to predict whether income exceeds $50K/yr based on the census dataset. Dataset is from the UCI data repository - http://archive.ics.uci.edu/ml/datasets/Census+Income. The predictive models include Decision Tree, Random Forest, and soft margin SVMs. 
+
+### Impute missing value using K-NN and create dummy variables
+
+```{r Impute missing value using K-NN}
+# read in the adult_data, remove education level column, create set_A to be the subset without missing value
+# and set_B to be the subset with missing value
+
+library(class)
+adult_data <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data", 
+                         sep = ",", header = FALSE, na.strings = " ?")
+adult_data <- adult_data[,-4] 
+set_A <- adult_data[complete.cases(adult_data),]
+set_B <- adult_data[!complete.cases(adult_data),]
+
+
+# The function I have used is called Fill in NA values with the values of the nearest neighbours (knnImputation {DMwR}).
+# This function will automatically create dummy variables for the categorical variable. I set the scale = T 
+# to normalize each dimension. 
+
+library("DMwR")
+impute_missing_valuables_training <- knnImputation(set_B, k = 5, scale = T, meth = "median",
+                                          distData = set_A)
+adult_data_complet <- rbind(set_A,impute_missing_valuables_training)
+colnames(adult_data_complet) <- c("age", "workclass","fnlwgt","education_num","marital_status",
+                         "occupation","relationship","race","sex","capital_gain","capital_loss",
+                         "hours_per_week","native_country","income")
+colnames(impute_missing_valuables_training) <- c("age", "workclass","fnlwgt","education_num","marital_status",
+                                  "occupation","relationship","race","sex","capital_gain","capital_loss",
+                                  "hours_per_week","native_country","income")
+write.table(adult_data_complet,file = "adult_data_complet_meth_median.txt", sep = ",", row.names = FALSE,
+            col.names = TRUE )
+write.table(impute_missing_valuables_training,file = "impute_missing_valuables_meth_median_training.txt", sep = ",", row.names = FALSE,
+            col.names = TRUE )
+
+# The following code is to fill in NA values with KNN for adult_test. The above method applied here
+
+library(class)
+adult_test <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test", 
+                         sep = ",", header = FALSE, na.strings = " ?", skip =1)
+adult_test <- adult_test[,-4]
+set_C <- adult_test[complete.cases(adult_test),]
+set_D <- adult_test[!complete.cases(adult_test),]
+
+
+# The function I have used is called Fill in NA values with the values of the nearest neighbours (knnImputation {DMwR}).
+# This function will automatically create dummy variables for the categorical variable. I set the scale = T 
+# to normalize each dimension. 
+
+library("DMwR")
+impute_missing_valuables_test <- knnImputation(set_D, k = 5, scale = T, meth = "median",
+                                          distData = set_C)
+adult_test_complet <- rbind(set_C,impute_missing_valuables_test)
+colnames(adult_test_complet) <- c("age", "workclass","fnlwgt","education_num","marital_status",
+                                  "occupation","relationship","race","sex","capital_gain","capital_loss",
+                                  "hours_per_week","native_country","income")
+colnames(impute_missing_valuables_test) <- c("age", "workclass","fnlwgt","education_num","marital_status",
+                                        "occupation","relationship","race","sex","capital_gain","capital_loss",
+                                        "hours_per_week","native_country","income")
+write.table(adult_test_complet,file = "adult_test_complet_meth_median.txt", sep = ",", row.names = FALSE,
+            col.names = TRUE )
+write.table(impute_missing_valuables_test,file = "impute_missing_valuables_meth_median_test.txt", sep = ",", row.names = FALSE,
+            col.names = TRUE )
+```
+
+### Decision tree 
+Decision tree is used to predict the income. How a decision variable was chosen is as follows: the split which maximizes the reduction in impurity is chosen, the data set split and the process repeated. Splitting continues until the terminal nodes are too small or too few to be split. To avoid over fitting, the classification error rate was used to guide the cross-validation and pruning process. 
+
+```{r, Decision tree}
+library(tree)
+
+#create dummy values for training data because to implement decision tree in R, factor predictors must have at most 32 levels.
+
+library(dummies)
+adult_data_complet <- cbind(adult_data_complet,dummy(adult_data_complet$native_country))
+
+# tree creation for training data without prunning 
+
+for (i in 15:55){
+  names(adult_data_complet)[i]= paste("is_",unlist(strsplit(names(adult_data_complet)[i]," "))[2],sep = "")}
+
+names(adult_data_complet)[c(20,22,29,42,47,52,53)]=c("is_Dominican_Republic","is_El_Salvador","is_Holand_Netherlands", 
+                                                     "is_Outlying_US","is_Puerto_Rico","is_Trinadad_and_Tobago","is_United_States")
+
+tree.income <- tree(income~.-native_country, data = adult_data_complet)
+summary(tree.income)
+plot(tree.income)
+text(tree.income,pretty=0)
+
+
+# Create dummy values for test data, add In the test data, none the observations' native_country is Holand_Netherlands while 
+# there are some training observations come from Holand_Netherlands. 
+# So I add one column "Is Holand_Netherlands" to the test data and set its value to be 0 for all test observations.
+
+adult_test_complet <- cbind(adult_test_complet,dummy(adult_test_complet$native_country))
+for (i in 15:54){
+  names(adult_test_complet)[i]= paste("is_",unlist(strsplit(names(adult_test_complet)[i]," "))[2],sep = "")}
+
+names(adult_test_complet)[c(20,22,41,46,51,52)]=c("is_Dominican_Republic","is_El_Salvador","is_Outlying_US","is_Puerto_Rico",
+                                                  "is_Trinadad_and_Tobago","is_United_States")
+adult_test_complet[55]=0
+names(adult_test_complet)[55] = "is_Holand_Netherlands"
+
+# Using tree model(without prunning) to predict test data
+
+tree.predict = predict(tree.income,adult_test_complet,type = "class")
+test.income =  adult_test_complet$income 
+table(test.income, tree.predict)
+
+
+# prunning the tree according to the classification error rate
+
+cv.income = cv.tree(tree.income,FUN=prune.misclass)
+par(mfrow=c(1,2))
+
+# Plot tree size vs error rate to decide the tree size for the pruned tree
+
+plot(cv.income$size,cv.income$dev,type="b", xlab = "The number of terminal nodes(tree size)", ylab = "Corresponding error rate")
+
+plot(cv.income$k,cv.income$dev,type="b")
+
+# Prune the tree to a 5 node tree. 
+
+prune.income = prune.misclass(tree.income, best =5)
+
+# Caculate the accuracy of decision tree for the training data 
+
+summary(prune.income)
+train.income = adult_data_complet$income
+prune.predict = predict(prune.income,adult_data_complet,type = "class")
+table(train.income, prune.predict)
+
+
+# using prunned tree to make prediction for the test data and calculate the accuracy for the test data 
+
+prune.predict = predict(prune.income,adult_test_complet,type = "class")
+table(test.income, prune.predict)
+plot(prune.income)
+text(prune.income)
+
+```
+
+### Random Forest
+Random Forests were used to de-correlate the trees. Build 1000 decision trees on bootstrapped training sample, but when building these trees, each time a split in a tree is considered, a random sample of 7 predictors is chosen as split candidates from the full set of 53 predictors. I choose 7 because 7 is about the same as the square root of 53. Each bootstrap data set contains 32561 observations, sampled with replacement from the imputed training data set.
+```{r Random Forest}
+# Inorder to compute the accuracy, I created test.income to represent true classifiers. It then will be
+# Compared with the predicted classifiers. Because true classifiers(test.income) has different levels
+# than the predicted one. So I changed them to have the same level. 
+
+adult_test_complet$income = as.character(adult_test_complet$income)
+adult_test_complet$income[adult_test_complet$income == " <=50K."] = " <=50K"
+adult_test_complet$income[adult_test_complet$income == " >50K."] = " >50K"
+adult_test_complet$income = as.factor(adult_test_complet$income)
+test.income = adult_test_complet$income
+levels(test.income) = c(" <=50K", " >50K")
+
+library(boot)
+
+# 1000 Boosttrapping datasets, sampled with replacement from the imputed training data set (adult_data_complet) were used to build decision trees 
+# and predict the income for the test dataset. Average accuracy for the test dataset was calculated by mean(test.income == prune.predict)
+# where test.income is the true classifier and prune.predict is the predicted classifier.
+
+boot_fn_test = function(data, index){
+  tree.income <- tree(income~.-native_country, data =data, subset=index)
+  prune.income = prune.misclass(tree.income, best =5)
+  prune.predict = predict(prune.income,adult_test_complet,type = "class")
+  return(mean(test.income == prune.predict))}
+
+boot(adult_data_complet, boot_fn_test, R=1000)
+
+
+# Random Forests were used to de-correlate the trees. Build 1000 decision trees on bootstrapped training sample, but when building these trees, 
+# each time a split in a tree is considered, a random sample of 7 predictors is chosen as split candidates from the full set of 53 predictors. 
+# I choose 7 because 7 is close to the square root of 53. 
+
+randomtree = randomForest::randomForest(income~.-native_country, data = adult_data_complet,
+                           ntree = 1000, mtry = 7)
+
+# apply Random Forest method to predict the incomes for all of the test cases in the census dataset.
+# The average accuracy over all test cases is computed using mean(trandomtree.predict == test.income),
+# where test.income is the true classifier and randomtree.predict is the predicted classifier from random Forest
+
+randomtree.predict = predict(randomtree, newdata = adult_test_complet)
+mean(randomtree.predict == test.income)
+
+# Check the influence of number of trees to the accuracy of bootstrapping and randomforest. 
+print("Bootstrape 100 dataset")
+boot(adult_data_complet, boot_fn_test, R=100)
+print("random Forest 100 dataset")
+randomtree = randomForest::randomForest(income~.-native_country, data = adult_data_complet,
+                                        ntree = 100, mtry = 7)
+randomtree.predict = predict(randomtree, newdata = adult_test_complet)
+mean(randomtree.predict == test.income)
+
+
+print("Bootstrape 500 dataset")
+boot(adult_data_complet, boot_fn_test, R=500)
+print("random Forest 500 dataset")
+randomtree = randomForest::randomForest(income~.-native_country, data = adult_data_complet,
+                                        ntree = 500, mtry = 7)
+randomtree.predict = predict(randomtree, newdata = adult_test_complet)
+mean(randomtree.predict == test.income)
+
+
+print("Bootstrape 1500 dataset")
+boot(adult_data_complet, boot_fn_test, R=1500)
+print("random Forest 1500 dataset")
+randomtree = randomForest::randomForest(income~.-native_country, data = adult_data_complet,
+                                        ntree = 1500, mtry = 7)
+randomtree.predict = predict(randomtree, newdata = adult_test_complet)
+mean(randomtree.predict == test.income)
+
+print("Bootstrape 2000 dataset")
+boot(adult_data_complet, boot_fn_test, R=2000)
+print("random Forest 2000 dataset")
+randomtree = randomForest::randomForest(income~.-native_country, data = adult_data_complet,
+                                        ntree = 2000, mtry = 7)
+randomtree.predict = predict(randomtree, newdata = adult_test_complet)
+mean(randomtree.predict == test.income)
+
+```
+### SVM 
+Soft margin SVMs are used here. A cost argument allows us to specify the cost of a violation to the margin. When the cost argument is small, then the margins will be wide and many support vectors will be on the margin or will violate the margin. When the cost argument is large, then the margins will be narrow and there will be few support vectors on the margin or violating the margin. The e1071 library in R includes a built-in function, tune(), to perform cross validation and provide the best model with cost parameter tunned from a range of c(0.1,1,10,100). 
+```{r svM}
+# Set the level of the test dataset to be the same as that of the training dataset
+
+levels(adult_test_complet$native_country) = levels(adult_data_complet$native_country)
+
+library(e1071)
+
+# The following code is to tune the parameter "cost" according to cross validation, tune.out is
+# for radial basis function kernal,  tune.out_polynomial is for polynomial kernal. 
+# tune.out$best.model stores the best model using the RBF kernel, which has the lowest 
+# cross-validation error rate. tune.out_polynomial$best.model stores the best model using the 
+# polynomial kernel. Then these models were used by predict function to predict the incomes 
+# for all of the imputed test cases in the census dataset. Moreover, tune.out$best.model$coefs 
+# and tune.out_polynomial$best.model$coefs can provide the resulting alpha's for the best model.
+# Table and mean function can be used to calcuate the accuracy.
+
+tune.out = tune(svm, 
+                income~.,
+                data = adult_data_complet, 
+                kernel = "radial", 
+                ranges=list(cost=c(0.1,1,10,100)))
+radial_predict = predict(tune.out$best.model, newdata = adult_test_complet)
+table(test.income,radial_predict)
+mean(test.income == radial_predict)
+tune.out$best.model$coefs
+tune.out$best.model$labels
+for (i in 5424:10596){ tune.out$best.model$coefs[i] = tune.out$best.model$coefs[i]/2 }
+plot(tune.out$best.model$coefs)
+
+
+tune.out_polynomial = tune(svm,
+                           income~.,
+                           data = adult_data_complet,
+                           kernel = "polynomial",
+                           ranges=list(cost=c(0.1,1,10,100)))
+polynomial_predict = predict(tune.out_polynomial$best.model, newdata = adult_test_complet)
+table(test.income,polynomial_predict)
+mean(test.income == polynomial_predict)
+for (i in 5717:11225){ tune.out_polynomial$best.model$coefs[i] = tune.out_polynomial$best.model$coefs[i]/2 }
+plot(tune.out_polynomial$best.model$coefs)
+
+
+```
+
